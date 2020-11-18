@@ -10,7 +10,6 @@ HDR_SZ = 24
 BUFF_SZ = 2048
 TARGET = 160504  # 4060504 % 650000
 NUM_PER_IT = 500
-# TARGET = 475
 TOTAL_ITERATIONS = TARGET / NUM_PER_IT
 
 
@@ -318,7 +317,7 @@ class Lab5(object):
     def construct_getdata_payload(self, block_hash):
         count = compactsize_t(1)
 
-        block = bytearray.fromhex(convertLittletoBig(block_hash))
+        block = bytearray.fromhex(convertLittletoBig('000000000000058a4a53582cde13ea4565bda6741ef64556d34a9515c4700e76'))
 
         hashType = uint32_t(2)
 
