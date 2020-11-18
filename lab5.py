@@ -4,17 +4,15 @@ import struct
 from time import strftime, gmtime
 import time
 
-# 52.53.184.110
-# 94.52.112.227
-
 PEER_HOST = '94.52.112.227'
 PEER_PORT = 8333
 HDR_SZ = 24
 BUFF_SZ = 2048
-# TARGET = 160504  # 4060504 % 650000
+TARGET = 160504  # 4060504 % 650000
 NUM_PER_IT = 500
-TARGET = 6475
+# TARGET = 475
 TOTAL_ITERATIONS = TARGET / NUM_PER_IT
+
 
 def check_sum(n):
     return hashlib.sha256(hashlib.sha256(n).digest()).digest()[:4]
@@ -36,6 +34,8 @@ def unmarshal_compactsize(b):
         return b[0:9], unmarshal_uint(b[1:9])
     if key == 0xfe:
         return b[0:5], unmarshal_uint(b[1:5])
+    if key == 0xfd:
+        return b[0:3], unmarshal_uint(b[1:3])
     return b[0:1], unmarshal_uint(b[0:1])
 
 
@@ -105,47 +105,52 @@ def print_message(msg, text=None, iteration=0):
         highest, found = print_inv_msg(payload, iteration)
     elif command == 'block':
         print_block_msg(payload)
-    # FIXME print out the payloads of other types of messages, too
     return command, highest, found
 
 
 def print_block_msg(b):
-    print('this is where the printing of the block payload goes')
+    print('BLOCK HEADER')
+    print('--------------------------------------------------------------------'
+          '--------------------------------')
 
-    version = b[:4].hex()
+    prefix = '  '
+
+    version = b[:4]
     prev_header_hash = convertLittletoBig(b[4:36].hex())
     merkle_root_hash = convertLittletoBig(b[36:68].hex())
-    unix_time = unmarshal_int(b[68:72])
-    unix_time_hex = b[68:72].hex()
+    unix_time = b[68:72]
+    time_str = strftime("%a, %d %b %Y %H:%M:%S GMT",
+                        gmtime(unmarshal_int(unix_time)))
     nbits = convertLittletoBig(b[72:76].hex())
     nonce = convertLittletoBig(b[76:80].hex())
 
-    txn_count = b[80:81].hex()
-    tx1_version = b[81:85].hex()
-    tx1_flag = b[85:86].hex()
-    previous_outpoint = b[86:122].hex()
+    print('{}{:80} version {}'.format(prefix, version.hex(),
+                                      unmarshal_int(version)))
+    print('{}{:80} Previous Header Hash'.format(prefix, prev_header_hash))
+    print('{}{:80} Merkle Root Hash'.format(prefix, merkle_root_hash))
+    print('{}{:80} epoch time {}'.format(prefix, unix_time.hex(), time_str))
+    print('{}{:80} nbits'.format(prefix, nbits))
+    print('{}{:80} nonce'.format(prefix, nonce))
 
-    print('version', version)
-    print('prev header hash', prev_header_hash)
-    print('merkle root hash', merkle_root_hash)
-    print('unix time', unix_time)
-    print('unix time hex', unix_time_hex)
-    print('nbits', nbits)
-    print('nonce', nonce)
+    split = b[80:].split(bytes.fromhex('01000000'))
+    key, count = unmarshal_compactsize(split[0])
 
-    print('transaction count', txn_count)
-    print('tx 1 version', tx1_version)
-    print('tx 1 flag', tx1_flag)
-    print('previous_outpoint', previous_outpoint)
+    print('TRANSACTIONS')
+    print(
+        '--------------------------------------------------------------------'
+        '--------------------------------')
+    print('{}{:80} Transaction Count {}'.format(prefix, key.hex(), count))
 
 
 def print_inv_msg(b, iteration):
     if iteration == 0 or TOTAL_ITERATIONS - iteration < 2:
         print('INV')
         print(
-            '----------------------------------------------------------------------------------------------------')
+            '-----------------------------------------------------------------'
+            '-----------------------------------')
         print(b[:3].hex(),
-              '   (each hash printed in reverse of serialized order for clarity)   count 500')
+              '   (each hash printed in reverse of serialized order for clarity'
+              ')   count 500')
     count = 1
     iterationStart = iteration * 500
     numBytes = 36
@@ -156,10 +161,12 @@ def print_inv_msg(b, iteration):
             starter = block[:8]
             remainder = convertLittletoBig(block[8:])
             if iterationStart + count == TARGET:
-                print(starter, remainder, 'MSG_BLOCK', 'inventory #' + str(iterationStart + count))
+                print(starter, remainder, 'MSG_BLOCK',
+                      'inventory #' + str(iterationStart + count))
                 return remainder, True
             if iteration == 0 or TOTAL_ITERATIONS - iteration < 2:
-                print(starter, remainder, 'MSG_BLOCK', 'inventory #' + str(iterationStart + count))
+                print(starter, remainder, 'MSG_BLOCK',
+                      'inventory #' + str(iterationStart + count))
             count += 1
         except Exception:
             continue
@@ -178,13 +185,11 @@ def print_version_msg(b):
     :param payload: version message contents
     """
     # pull out fields
-    version, my_services, epoch_time, your_services = b[:4], b[4:12], b[
-                                                                      12:20], b[
-                                                                              20:28]
-    rec_host, rec_port, my_services2, my_host, my_port = b[28:44], b[44:46], b[
-                                                                             46:54], b[
-                                                                                     54:70], b[
-                                                                                             70:72]
+    version, my_services, epoch_time, your_services = b[:4], b[4:12], \
+                                                      b[12:20], b[20:28]
+    rec_host, rec_port, my_services2, my_host, my_port = b[28:44], b[44:46], \
+                                                         b[46:54], b[54:70], \
+                                                         b[70:72]
     nonce = b[72:80]
     user_agent_size, uasz = unmarshal_compactsize(b[80:])
     i = 80 + len(user_agent_size)
@@ -230,12 +235,12 @@ def print_header(header, expected_cksum=None):
     """
     Report the contents of the given bitcoin message header
     :param header: bitcoin message header (bytes or bytearray)
-    :param expected_cksum: the expected checksum for this version message, if known
+    :param expected_cksum: the expected checksum for this version message, if
+                            known
     :return: message type
     """
-    magic, command_hex, payload_size, cksum = header[:4], header[4:16], header[
-                                                                        16:20], header[
-                                                                                20:]
+    magic, command_hex, payload_size, cksum = header[:4], header[4:16], \
+                                              header[16:20], header[20:]
     command = str(bytearray([b for b in command_hex if b != 0]),
                   encoding='utf-8')
     psz = unmarshal_uint(payload_size)
@@ -297,11 +302,14 @@ class Lab5(object):
     def find_my_block(self, highest_inv, found):
         iteration = 1
         while not found:
-            getblocksPayload = self.construct_getblocks_payload(False, highest_inv)
-            getblocksHeader = self.construct_header(getblocksPayload, 'getblocks')
+            getblocksPayload = self.construct_getblocks_payload(False,
+                                                                highest_inv)
+            getblocksHeader = self.construct_header(getblocksPayload,
+                                                    'getblocks')
             getblocksMsg = getblocksHeader + getblocksPayload
 
-            highest_inv, found = self.process_message(getblocksMsg, 'getblocks', iteration)
+            highest_inv, found = self.process_message(getblocksMsg, 'getblocks',
+                                                      iteration)
 
             iteration += 1
         return highest_inv
@@ -317,7 +325,6 @@ class Lab5(object):
         payload = count + hashType + block
 
         return payload
-
 
     def construct_getblocks_payload(self, initial, highest=''):
         version = int32_t(70015)
@@ -358,7 +365,8 @@ class Lab5(object):
                     processedMessages.extend(self.split_message(
                         bytes.fromhex(splitMsg[2])))
                     checksum = check_sum(payload)
-            check, highest, found = print_message(header + payload, 'Received', iteration)
+            check, highest, found = print_message(header + payload, 'Received',
+                                                  iteration)
             # print('the highest inv is', highest)
         if command == 'getblocks':
             if check != 'inv':
