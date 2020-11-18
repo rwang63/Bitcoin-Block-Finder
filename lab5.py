@@ -11,8 +11,10 @@ PEER_HOST = '94.52.112.227'
 PEER_PORT = 8333
 HDR_SZ = 24
 BUFF_SZ = 2048
-TARGET = 160504  # 4060504 % 650000
-
+# TARGET = 160504  # 4060504 % 650000
+NUM_PER_IT = 500
+TARGET = 6475
+TOTAL_ITERATIONS = TARGET / NUM_PER_IT
 
 def check_sum(n):
     return hashlib.sha256(hashlib.sha256(n).digest()).digest()[:4]
@@ -95,15 +97,16 @@ def print_message(msg, text=None, iteration=0):
     command = print_header(msg[:HDR_SZ], check_sum(payload))
 
     highest = ''
+    found = False
 
     if command == 'version':
         print_version_msg(payload)
     elif command == 'inv':
-        highest = print_inv_msg(payload, iteration)
+        highest, found = print_inv_msg(payload, iteration)
     elif command == 'block':
         print_block_msg(payload)
     # FIXME print out the payloads of other types of messages, too
-    return command, highest
+    return command, highest, found
 
 
 def print_block_msg(b):
@@ -137,12 +140,14 @@ def print_block_msg(b):
 
 
 def print_inv_msg(b, iteration):
-    print(' INV')
-    print(
-        '----------------------------------------------------------------------------------------------------')
-    print(b[:3].hex(),
-          '   (each hash printed in reverse of serialized order for clarity)   count 500')
-    count = iteration * 500 + 1
+    if iteration == 0 or TOTAL_ITERATIONS - iteration < 2:
+        print('INV')
+        print(
+            '----------------------------------------------------------------------------------------------------')
+        print(b[:3].hex(),
+              '   (each hash printed in reverse of serialized order for clarity)   count 500')
+    count = 1
+    iterationStart = iteration * 500
     numBytes = 36
     remainder = ''
     for i in range(3, len(b), numBytes):
@@ -150,11 +155,15 @@ def print_inv_msg(b, iteration):
             block = b[i:i + numBytes].hex()
             starter = block[:8]
             remainder = convertLittletoBig(block[8:])
-            print(starter, remainder, 'MSG_BLOCK', 'inventory #' + str(count))
+            if iterationStart + count == TARGET:
+                print(starter, remainder, 'MSG_BLOCK', 'inventory #' + str(iterationStart + count))
+                return remainder, True
+            if iteration == 0 or TOTAL_ITERATIONS - iteration < 2:
+                print(starter, remainder, 'MSG_BLOCK', 'inventory #' + str(iterationStart + count))
             count += 1
         except Exception:
             continue
-    return remainder
+    return remainder, False
 
 
 def convertLittletoBig(string):
@@ -275,30 +284,30 @@ class Lab5(object):
         getblocksHeader = self.construct_header(getblocksPayload, 'getblocks')
         getblocksMsg = getblocksHeader + getblocksPayload
 
-        highest_inv = self.process_message(getblocksMsg, 'getblocks')
-        print('highest inv ', highest_inv)
+        highest_inv, found = self.process_message(getblocksMsg, 'getblocks')
 
-        self.find_my_block(highest_inv)
+        highest_inv = self.find_my_block(highest_inv, found)
 
-        # getdataPayload = self.construct_getdata_payload()
-        # getdataHeader = self.construct_header(getdataPayload, 'getdata')
-        # getdataMsg = getdataHeader + getdataPayload
-        #
-        # self.process_message(getdataMsg, 'getdata')
+        getdataPayload = self.construct_getdata_payload(highest_inv)
+        getdataHeader = self.construct_header(getdataPayload, 'getdata')
+        getdataMsg = getdataHeader + getdataPayload
 
-    def find_my_block(self, highest_inv):
+        self.process_message(getdataMsg, 'getdata')
+
+    def find_my_block(self, highest_inv, found):
         iteration = 1
-        while iteration < 4:
+        while not found:
             getblocksPayload = self.construct_getblocks_payload(False, highest_inv)
             getblocksHeader = self.construct_header(getblocksPayload, 'getblocks')
             getblocksMsg = getblocksHeader + getblocksPayload
 
-            highest_inv = self.process_message(getblocksMsg, 'getblocks', iteration)
+            highest_inv, found = self.process_message(getblocksMsg, 'getblocks', iteration)
 
             iteration += 1
+        return highest_inv
 
     # my hash: 000000000000058a4a53582cde13ea4565bda6741ef64556d34a9515c4700e76
-    def construct_getdata_payload(self, block_hash='000000000000058a4a53582cde13ea4565bda6741ef64556d34a9515c4700e76'):
+    def construct_getdata_payload(self, block_hash):
         count = compactsize_t(1)
 
         block = bytearray.fromhex(convertLittletoBig(block_hash))
@@ -330,7 +339,7 @@ class Lab5(object):
         self.listener.send(message)
         received = self.listener.recv(BUFF_SZ)
         processedMessages = self.split_message(received)
-        check, msg, highest = '', '', ''
+        check, msg, highest, found = '', '', '', False
 
         for msg in processedMessages:
             payload = msg[HDR_SZ:]
@@ -349,13 +358,13 @@ class Lab5(object):
                     processedMessages.extend(self.split_message(
                         bytes.fromhex(splitMsg[2])))
                     checksum = check_sum(payload)
-            check, highest = print_message(header + payload, 'Received', iteration)
-            print('the highest inv is', highest)
+            check, highest, found = print_message(header + payload, 'Received', iteration)
+            # print('the highest inv is', highest)
         if command == 'getblocks':
             if check != 'inv':
                 return self.process_message(msg, command)
 
-        return highest
+        return highest, found
 
     @staticmethod
     def split_message(message):
