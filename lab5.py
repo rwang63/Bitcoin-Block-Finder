@@ -93,14 +93,17 @@ def print_message(msg, text=None, iteration=0):
                            msg[:60].hex() + ('' if len(msg) < 60 else '...')))
     payload = msg[HDR_SZ:]
     command = print_header(msg[:HDR_SZ], check_sum(payload))
+
+    highest = ''
+
     if command == 'version':
         print_version_msg(payload)
     elif command == 'inv':
-        print_inv_msg(payload, iteration)
+        highest = print_inv_msg(payload, iteration)
     elif command == 'block':
         print_block_msg(payload)
     # FIXME print out the payloads of other types of messages, too
-    return command
+    return command, highest
 
 
 def print_block_msg(b):
@@ -141,6 +144,7 @@ def print_inv_msg(b, iteration):
           '   (each hash printed in reverse of serialized order for clarity)   count 500')
     count = iteration * 500 + 1
     numBytes = 36
+    remainder = ''
     for i in range(3, len(b), numBytes):
         try:
             block = b[i:i + numBytes].hex()
@@ -150,6 +154,7 @@ def print_inv_msg(b, iteration):
             count += 1
         except Exception:
             continue
+    return remainder
 
 
 def convertLittletoBig(string):
@@ -266,22 +271,31 @@ class Lab5(object):
 
         self.process_message(verack)
 
-        highest_inv = 0
-        iteration = 0
-
-        # while iteration <= 5:
         getblocksPayload = self.construct_getblocks_payload(True)
         getblocksHeader = self.construct_header(getblocksPayload, 'getblocks')
         getblocksMsg = getblocksHeader + getblocksPayload
 
-        self.process_message(getblocksMsg, 'getblocks', iteration)
-        iteration += 1
+        highest_inv = self.process_message(getblocksMsg, 'getblocks')
+        print('highest inv ', highest_inv)
+
+        self.find_my_block(highest_inv)
 
         # getdataPayload = self.construct_getdata_payload()
         # getdataHeader = self.construct_header(getdataPayload, 'getdata')
         # getdataMsg = getdataHeader + getdataPayload
         #
         # self.process_message(getdataMsg, 'getdata')
+
+    def find_my_block(self, highest_inv):
+        iteration = 1
+        while iteration < 4:
+            getblocksPayload = self.construct_getblocks_payload(False, highest_inv)
+            getblocksHeader = self.construct_header(getblocksPayload, 'getblocks')
+            getblocksMsg = getblocksHeader + getblocksPayload
+
+            highest_inv = self.process_message(getblocksMsg, 'getblocks', iteration)
+
+            iteration += 1
 
     # my hash: 000000000000058a4a53582cde13ea4565bda6741ef64556d34a9515c4700e76
     def construct_getdata_payload(self, block_hash='000000000000058a4a53582cde13ea4565bda6741ef64556d34a9515c4700e76'):
@@ -296,14 +310,14 @@ class Lab5(object):
         return payload
 
 
-    def construct_getblocks_payload(self, initial):
+    def construct_getblocks_payload(self, initial, highest=''):
         version = int32_t(70015)
         hashCount = compactsize_t(1)
 
         if initial:
             blockHeaderHashes = struct.pack("32s", b'\x00')
         else:
-            blockHeaderHashes = bytearray.fromhex(convertLittletoBig('ec8f0e6df755d105f2907032ddf269513b080b3f4b92bdf34f9c9ad400000000'))
+            blockHeaderHashes = bytearray.fromhex(convertLittletoBig(highest))
 
         stopHash = struct.pack("32s", b'\x00')
 
@@ -316,7 +330,7 @@ class Lab5(object):
         self.listener.send(message)
         received = self.listener.recv(BUFF_SZ)
         processedMessages = self.split_message(received)
-        check, msg = '', ''
+        check, msg, highest = '', '', ''
 
         for msg in processedMessages:
             payload = msg[HDR_SZ:]
@@ -335,12 +349,13 @@ class Lab5(object):
                     processedMessages.extend(self.split_message(
                         bytes.fromhex(splitMsg[2])))
                     checksum = check_sum(payload)
-            check = print_message(header + payload, 'Received', iteration)
+            check, highest = print_message(header + payload, 'Received', iteration)
+            print('the highest inv is', highest)
         if command == 'getblocks':
             if check != 'inv':
                 return self.process_message(msg, command)
 
-        return
+        return highest
 
     @staticmethod
     def split_message(message):
