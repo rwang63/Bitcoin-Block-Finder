@@ -1,19 +1,40 @@
+"""
+Acknowledgement: This program was developed using code stubs and code provided
+in class developed by Professor Kevin Lundeen. Uncommented methods for
+interpretation and conversion of endianness were provided and authored by
+Professor Kevin Lundeen.
+
+CPSC 5520, Seattle University
+This is free and unencumbered software released into the public domain.
+:Author: Ruifeng Wang
+:Version: Fall2020
+
+Extra Credit: Implemented the first part of interpreting the transaction message
+for my block. Got the block header and number of transactions, but had
+trouble parsing the raw tx data out after that
+"""
+
 import hashlib
 import socket
 import struct
 from time import strftime, gmtime
 import time
 
-PEER_HOST = '94.52.112.227'
-PEER_PORT = 8333
-HDR_SZ = 24
-BUFF_SZ = 2048
-TARGET = 160504  # 4060504 % 650000
-NUM_PER_IT = 500
-TOTAL_ITERATIONS = TARGET / NUM_PER_IT
+PEER_HOST = '94.52.112.227'  # Host of peer to be connected to
+PEER_PORT = 8333  # Port of peer to be connected to
+HDR_SZ = 24  # Size of header
+BUFF_SZ = 2048  # Size of buffer being received
+TARGET = 160504  # Target block, calculated by: 4060504 % 650000
+NUM_PER_IT = 500  # Number of blocks returned in each iteration of INV
+TOTAL_ITERATIONS = TARGET / NUM_PER_IT  # Number of iterations needed to run
 
 
 def check_sum(n):
+    """
+    Calculates the checksum by hashing the block twice through SHA256
+    :param n: bytestream to be hashed
+    :return: first 4 of the double hash of the payload
+    """
     return hashlib.sha256(hashlib.sha256(n).digest()).digest()[:4]
 
 
@@ -87,7 +108,10 @@ def print_message(msg, text=None, iteration=0):
     """
     Report the contents of the given bitcoin message
     :param msg: bitcoin message including header
-    :return: message type
+    :param text: text to be printed, default is None
+    :param iteration: tracking which iteration of getblock
+    :return: message type, highest block, whether the block being searched for
+    was found or not
     """
     print('\n{}MESSAGE'.format('' if text is None else (text + ' ')))
     print('({}) {}'.format(len(msg),
@@ -108,6 +132,11 @@ def print_message(msg, text=None, iteration=0):
 
 
 def print_block_msg(b):
+    """
+    Prints data associated with a specific block passed in
+    :param b: Block that contains the data to be printed
+    :return: None
+    """
     print('BLOCK HEADER')
     print('--------------------------------------------------------------------'
           '--------------------------------')
@@ -142,6 +171,12 @@ def print_block_msg(b):
 
 
 def print_inv_msg(b, iteration):
+    """
+    Parses and prints the INV message
+    :param b: Inv message to be parsed and printed
+    :param iteration: Tracks which iteration of printing is being printed
+    :return: highest block hash, whether the desired block was found or not
+    """
     if iteration == 0 or TOTAL_ITERATIONS - iteration < 2:
         print('INV')
         print(
@@ -173,6 +208,11 @@ def print_inv_msg(b, iteration):
 
 
 def convertLittletoBig(string):
+    """
+    Converts a hex from little endian to big endian or vice versa
+    :param string: hex to be converted
+    :return: opposite endianness of passed in hex
+    """
     t = bytearray.fromhex(string)
     t.reverse()
     return ''.join(format(x, '02x') for x in t)
@@ -181,7 +221,7 @@ def convertLittletoBig(string):
 def print_version_msg(b):
     """
     Report the contents of the given bitcoin version message (sans the header)
-    :param payload: version message contents
+    :param b: version message contents
     """
     # pull out fields
     version, my_services, epoch_time, your_services = b[:4], b[4:12], \
@@ -261,17 +301,40 @@ def print_header(header, expected_cksum=None):
 
 
 class Lab5(object):
-
+    """
+    The goal of this lab is to communicate with the P2P Bitcoin block chain
+    and request and get an old block. The block is associated with my
+    SUID % 650_000. After sending and receiving responses for all the required
+    messages (Version/Version/Verack/Verack), we start to send getblocks
+    messages and in turn receive inv messages. Each inv message contains 500
+    blocks in it. Since we start from the origin block at a height of 0, we will
+    need to continuously send getblocks messages with higher and higher blocks
+    until we get an inv message with the height we are looking for. From there,
+    each block contains some block header data and then raw transactions, which
+    can be interpreted and displayed.
+    """
     def __init__(self):
+        """
+        Constructs a Lab5 object, doing the initial work to be able to
+        communicate with Bitcoin peers
+        """
         self.listener, self.listener_address = self.start_listener()
 
     @staticmethod
     def start_listener():
+        """
+        Starts a listener to be used with the Bitcoin peer network
+        :return: socket and socket address (host, port) tuple
+        """
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.bind(('', 0))
         return listener, listener.getsockname()
 
     def run(self):
+        """
+        Does the work of the program. All other methods are called from here
+        :return: None
+        """
         self.listener.connect((PEER_HOST, PEER_PORT))
 
         versionPayload = self.construct_version_payload()
@@ -299,6 +362,13 @@ class Lab5(object):
         self.process_message(getdataMsg, 'getdata')
 
     def find_my_block(self, highest_inv, found):
+        """
+        Method that loops until the desired block height is reached and the
+        block hash is returned
+        :param highest_inv: highest block hash we know about
+        :param found: true if found, false if not
+        :return: block hash for the desired height
+        """
         iteration = 1
         while not found:
             getblocksPayload = self.construct_getblocks_payload(False,
@@ -315,9 +385,15 @@ class Lab5(object):
 
     # my hash: 000000000000058a4a53582cde13ea4565bda6741ef64556d34a9515c4700e76
     def construct_getdata_payload(self, block_hash):
+        """
+        Constructs the payload of the getdata message
+        :param block_hash: the hash of block that we are going to send in the
+                            getdata payload
+        :return: constructed payload
+        """
         count = compactsize_t(1)
 
-        block = bytearray.fromhex(convertLittletoBig('000000000000058a4a53582cde13ea4565bda6741ef64556d34a9515c4700e76'))
+        block = bytearray.fromhex(convertLittletoBig(block_hash))
 
         hashType = uint32_t(2)
 
@@ -326,6 +402,13 @@ class Lab5(object):
         return payload
 
     def construct_getblocks_payload(self, initial, highest=''):
+        """
+        Constructs the payload of the getblocks message
+        :param initial: boolean indicator if this is the first pass through
+                        if so, we will use origin block, otherwise use highest
+        :param highest: highest block we currently know about
+        :return: constructed payload
+        """
         version = int32_t(70015)
         hashCount = compactsize_t(1)
 
@@ -341,6 +424,19 @@ class Lab5(object):
         return payload
 
     def process_message(self, message, command='', iteration=0):
+        """
+        Method that enables sending and receiving for every command
+        If in receiving, the checksum is not correct, will continue to receive
+        until the checksum is verified
+        If the message received and processed from a getblocks is not an inv
+        message, then the getblocks message is resent to ensure the proper
+        inv message is received and processed
+        :param message: message to be sent (header + payload)
+        :param command: command to be sent for (default is empty)
+        :param iteration: iteration that is being processed (default is 0 since
+                            this is only used for the getblock)
+        :return: highest block, whether the block was found
+        """
         print_message(message, 'Sending')
         self.listener.send(message)
         received = self.listener.recv(BUFF_SZ)
@@ -366,7 +462,6 @@ class Lab5(object):
                     checksum = check_sum(payload)
             check, highest, found = print_message(header + payload, 'Received',
                                                   iteration)
-            # print('the highest inv is', highest)
         if command == 'getblocks':
             if check != 'inv':
                 return self.process_message(msg, command)
@@ -375,6 +470,11 @@ class Lab5(object):
 
     @staticmethod
     def split_message(message):
+        """
+        Method to parse messages by the magic number
+        :param message: the message to be parsed
+        :return: array of the message fully parsed
+        """
         allMessages = message.hex()
         messageArr = allMessages.split('f9beb4d9')
         fullyParsedMessage = []
@@ -385,6 +485,12 @@ class Lab5(object):
 
     @staticmethod
     def construct_header(payload, command):
+        """
+        Constructs header for messages being sent out
+        :param payload: payload necessary to calculate checksum inside header
+        :param command: which command is being sent in the header
+        :return: header for specific message
+        """
         magic = bytearray.fromhex("F9BEB4D9")
         command = struct.pack("12s", command.encode())
         length = uint32_t(len(payload))
@@ -395,6 +501,10 @@ class Lab5(object):
         return header
 
     def construct_version_payload(self):
+        """
+        Constructs the payload for the version message
+        :return: payload for version message
+        """
         version = int32_t(70015)
         services = uint64_t(0)
         timestamp = int64_t(time.time())
@@ -424,5 +534,8 @@ class Lab5(object):
 
 
 if __name__ == '__main__':
+    """
+    Main entry point into Lab 5
+    """
     lab5 = Lab5()
     lab5.run()
